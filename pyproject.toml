@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qualifi-saas-release-guardrail"
+version = "0.1.0"
+description = "A local Playwright release-verification guardrail for a fictional SaaS application."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "python-multipart>=0.0.20,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "pytest>=8.3,<9",
+  "pytest-playwright>=0.7,<1",
+  "httpx>=0.28,<1",
+  "ruff>=0.11,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --tracing=retain-on-failure --screenshot=only-on-failure --output=test-results --junitxml=test-results/junit.xml"
+markers = [
+  "smoke: release-blocking critical workflow checks",
+  "regression: broader workflow coverage",
+  "api: HTTP API checks",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
