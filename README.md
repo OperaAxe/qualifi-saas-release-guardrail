@@ -1,28 +1,122 @@
 # QualiFi SaaS Release Guardrail
 
-A **real, local demonstration project** showing how a QA engineer can protect critical SaaS workflows before release. It builds and tests a fictional product called **FlowDesk**; it is not a production application or a client engagement.
+[![CI](https://github.com/OperaAxe/qualifi-saas-release-guardrail/actions/workflows/ci.yml/badge.svg)](https://github.com/OperaAxe/qualifi-saas-release-guardrail/actions/workflows/ci.yml)
 
-The project demonstrates Python, Playwright browser automation, Playwright API testing, business-journey regression coverage, CI, failure evidence, and a release-readiness report generated from actual JUnit results.
+## The short version
 
-## What it protects
+This is a small fictional SaaS product called **FlowDesk**. I use it to show how I test a product before release.
 
-- Authentication and protected-page access
-- Project creation and persistence
-- Subscription entitlement boundaries
-- Owner/editor/viewer permission behavior
-- Simulated subscription webhook processing and duplicate-event handling
+The point is not the demo app. The point is the thinking:
 
-## Architecture
+> **What does a real user do, what could go wrong, and how do we know the fix stayed fixed?**
 
-- `app/main.py` — small FastAPI demonstration SaaS with in-memory state
-- `tests/` — browser and API tests grouped by business journey
-- `tests/conftest.py` — starts an isolated local server for the test session
-- `tools/generate_release_report.py` — converts the real JUnit output into JSON and Markdown
-- `.github/workflows/ci.yml` — installs Python/Playwright, runs tests, and uploads evidence
+I start with the user journey manually. Then I turn the important checks into repeatable automated tests so the same risks are checked on every release.
 
-The demo deliberately uses in-memory state and fictional credentials so it is safe and free to run. It does not implement real payments.
+## Start here: follow the user journey
 
-## Setup
+You do not need to install anything to understand the project. The workflow has already run in GitHub Actions, and the repository contains the test plan and the demo application.
+
+### 1. Log in as a real user would
+
+Open the FlowDesk demo and log in as the synthetic owner account.
+
+**What I am checking manually:**
+
+- Does the login page make sense?
+- Does a valid user reach the dashboard?
+- Is a protected page still protected when the user is logged out?
+- Does logout actually end the session?
+
+### 2. Create something valuable
+
+Create a project with a name and description.
+
+**What I am checking manually:**
+
+- Can the user complete the main action without confusion?
+- Does the success state appear?
+- Does the new project appear in the list?
+- Does a refresh keep the project visible?
+
+That last check matters. A green toast is not proof that data was saved.
+
+### 3. Check the role boundary
+
+Repeat the journey as a viewer account.
+
+**What I am checking manually:**
+
+- Can the viewer see what they are allowed to see?
+- Is the restricted feature explained clearly?
+- Can the viewer reach a forbidden action through a direct request, or is the server also enforcing the rule?
+
+### 4. Check the subscription boundary
+
+Compare a Pro account with a Free account.
+
+**What I am checking manually:**
+
+- Does the feature appear for the right plan?
+- Does the restricted state explain what is unavailable?
+- Does changing the UI hide a feature without accidentally removing the server-side protection?
+
+### 5. Check the event edge case
+
+Send the same subscription webhook twice.
+
+**Expected result:** the first event is processed; the duplicate is handled safely instead of creating a second side effect.
+
+## What gets automated after the manual pass
+
+```mermaid
+flowchart LR
+    A[Manual user journey] --> B[Find business risk]
+    B --> C[Write a clear test oracle]
+    C --> D[Run browser and API checks]
+    D --> E[Capture failure evidence]
+    E --> F[Release ready or not ready]
+```
+
+| Manual question | Automated proof | Why it matters |
+|---|---|---|
+| Can the user log in and log out? | Browser authentication test | Users cannot reach the product if access is broken. |
+| Does a new project survive refresh? | End-to-end persistence test | A false success state creates support tickets and lost work. |
+| Do roles see the right feature? | Role and entitlement tests | A wrong plan or role can create trust and revenue problems. |
+| Is the API enforcing the rule? | Direct API permission check | Hiding a button is not access control. |
+| Is a duplicate event safe? | Idempotency test | Billing and subscription events must not double-apply. |
+
+## What a failed release looks like
+
+The test suite does not turn a result into “90% green, ship anyway.” A required check fails, the release report becomes **`not_ready`**, and GitHub Actions keeps the screenshot, trace, JUnit result, and report as evidence.
+
+That gives a team a useful conversation:
+
+1. What user journey failed?
+2. What did the user see?
+3. What did the API return?
+4. Is this a product defect, a test defect, or an environment problem?
+5. Has the fix been checked again?
+
+## Visual map of the project
+
+```mermaid
+flowchart TB
+    U[User] --> UI[FlowDesk browser]
+    UI --> API[FastAPI demo API]
+    API --> S[(Synthetic in-memory state)]
+    T[Playwright browser tests] --> UI
+    T2[Playwright API tests] --> API
+    T --> E[JUnit + screenshots + traces]
+    T2 --> E
+    E --> R[Release-readiness report]
+```
+
+## If you want to run it locally
+
+The setup is intentionally below the walkthrough. This is a portfolio demo, so the shortest useful route is to inspect the Actions run first.
+
+<details>
+<summary>Local setup</summary>
 
 ### Windows PowerShell
 
@@ -32,6 +126,7 @@ py -3.13 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m playwright install chromium
+pytest
 ```
 
 ### Bash
@@ -42,50 +137,23 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python -m playwright install chromium
-```
-
-## Run the demo application
-
-```bash
-python -m uvicorn app.main:app --reload
-```
-
-Open `http://127.0.0.1:8000`. Demo accounts are documented in the login page and are intentionally synthetic.
-
-## Run tests
-
-```bash
 pytest
-python tools/generate_release_report.py test-results/junit.xml
 ```
 
-Useful selections:
+Run the demo app with `python -m uvicorn app.main:app --reload`, then open `http://127.0.0.1:8000`.
 
-```bash
-pytest -m smoke
-pytest -m api
-pytest tests/test_core_workflow.py
-```
+</details>
 
-On a failed Playwright test, inspect `test-results/` for screenshots and traces. Open a trace with `playwright show-trace path/to/trace.zip` or use the local Trace Viewer. The CI workflow uploads these files as an artifact.
+## Where to look
 
-## Release decision
+- `docs/critical-workflows.md` — the business-risk checklist
+- `docs/demo-script.md` — the step-by-step walkthrough above
+- `docs/test-strategy.md` — the test oracles and failure rules
+- `tests/test_core_workflow.py` — the main user journey
+- `tests/test_subscription_and_roles.py` — plan and role behavior
+- `tools/generate_release_report.py` — turns real JUnit output into a release decision
+- `.github/workflows/ci.yml` — runs the checks and uploads evidence
 
-The report generator marks the release `not_ready` if any test case fails. A high pass percentage does not override a failed required check. The report is derived from the JUnit file produced by the test runner; no result is fabricated.
+## Honest scope
 
-## CI behavior
-
-GitHub Actions runs on pushes and pull requests to `main`. It installs Python 3.13, installs Chromium with OS dependencies, runs the suite, generates the report even if tests fail, and uploads JUnit results, screenshots, traces, and reports. The workflow has read-only repository permissions.
-
-## Failure diagnosis
-
-- **Test failure:** the application returned behavior different from the asserted oracle.
-- **Application defect:** the test is reproducible and the implementation violates the documented behavior.
-- **Environment problem:** the browser, dependency, port, or process could not start.
-- **Potential flake:** reruns pass without a code change; investigate timing, isolation, and test data before suppressing it.
-
-## Limitations
-
-This is a portfolio demonstration, not a production security review, performance benchmark, payment integration, or claim of complete coverage. The in-memory app is intentionally small. A production guardrail would add persistent test data isolation, secrets management, service contracts, observability, and deployment-environment coverage.
-
-See the learning and demo documents for interview preparation and a screen-share walkthrough.
+FlowDesk is fictional. The data is synthetic. This is not a production application, payment integration, penetration test, or claim of complete coverage. It is a focused example of how I move from **manual QA → risk-based coverage → repeatable release evidence**.
