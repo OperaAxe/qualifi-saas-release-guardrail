@@ -1,135 +1,37 @@
 # QualiFi SaaS Release Guardrail
 
+> **Playbook status: in progress.** I'm using a small fictional SaaS app to practise the path from manual testing to repeatable release checks. I’m still adding scenarios and tightening the report rules, so this is a working playbook—not a production-readiness claim.
+
 [![CI](https://github.com/OperaAxe/qualifi-saas-release-guardrail/actions/workflows/ci.yml/badge.svg)](https://github.com/OperaAxe/qualifi-saas-release-guardrail/actions/workflows/ci.yml)
 
-## The short version
+## What this project is for
 
-This is a small fictional SaaS product called **FlowDesk**. I use it to show how I test a product before release.
+FlowDesk is a demo app with login, projects, role/plan restrictions, and subscription webhooks. The useful part is the QA approach: start with a user journey, decide what would prove it worked, then turn important checks into regression tests and a release report.
 
-The point is not the demo app. The point is the thinking:
+## A real example in this repository: webhook retry
 
-> **What does a real user do, what could go wrong, and how do we know the fix stayed fixed?**
+The demo accepts only supported subscription events. One regression scenario tests this sequence:
 
-I start with the user journey manually. Then I turn the important checks into repeatable automated tests so the same risks are checked on every release.
+1. Send an event ID with an unsupported event type.
+2. Confirm the request is rejected.
+3. Retry the same ID with a supported event type.
+4. Confirm the valid retry is processed.
 
-## Start here: follow the user journey
+The order matters. If the app records the event ID before validating the type, the valid retry can be mistaken for a duplicate. This scenario uses synthetic local data; it isn't a claim about a production payment system.
 
-You do not need to install anything to understand the project. The workflow has already run in GitHub Actions, and the repository contains the test plan and the demo application.
+## Current coverage
 
-### 1. Log in as a real user would
+- Login and session access
+- Project creation and persistence after refresh
+- Viewer/owner plan and role behaviour
+- API validation and subscription webhook idempotency
+- Release report decisions based on JUnit test results
 
-Open the FlowDesk demo and log in as the synthetic owner account.
+The release report must not mark a run as ready if a required check fails—or if no tests passed. Test evidence should be real output, not a manually written green result.
 
-**What I am checking manually:**
+## Run locally
 
-- Does the login page make sense?
-- Does a valid user reach the dashboard?
-- Is a protected page still protected when the user is logged out?
-- Does logout actually end the session?
-
-### 2. Create something valuable
-
-Create a project with a name and description.
-
-**What I am checking manually:**
-
-- Can the user complete the main action without confusion?
-- Does the success state appear?
-- Does the new project appear in the list?
-- Does a refresh keep the project visible?
-
-That last check matters. A green toast is not proof that data was saved.
-
-### 3. Check the role boundary
-
-Repeat the journey as a viewer account.
-
-**What I am checking manually:**
-
-- Can the viewer see what they are allowed to see?
-- Is the restricted feature explained clearly?
-- Can the viewer reach a forbidden action through a direct request, or is the server also enforcing the rule?
-
-### 4. Check the subscription boundary
-
-Compare a Pro account with a Free account.
-
-**What I am checking manually:**
-
-- Does the feature appear for the right plan?
-- Does the restricted state explain what is unavailable?
-- Does changing the UI hide a feature without accidentally removing the server-side protection?
-
-### 5. Check the event edge case
-
-Send the same subscription webhook twice.
-
-**Expected result:** the first event is processed; the duplicate is handled safely instead of creating a second side effect.
-
-## What gets automated after the manual pass
-
-```mermaid
-flowchart LR
-    A[Manual user journey] --> B[Find business risk]
-    B --> C[Write a clear test oracle]
-    C --> D[Run browser and API checks]
-    D --> E[Capture failure evidence]
-    E --> F[Release ready or not ready]
-```
-
-| Manual question | Automated proof | Why it matters |
-|---|---|---|
-| Can the user log in and log out? | Browser authentication test | Users cannot reach the product if access is broken. |
-| Does a new project survive refresh? | End-to-end persistence test | A false success state creates support tickets and lost work. |
-| Do roles see the right feature? | Role and entitlement tests | A wrong plan or role can create trust and revenue problems. |
-| Is the API enforcing the rule? | Direct API permission check | Hiding a button is not access control. |
-| Is a duplicate event safe? | Idempotency test | Billing and subscription events must not double-apply. |
-
-## What a failed release looks like
-
-The test suite does not turn a result into “90% green, ship anyway.” A required check fails, the release report becomes **`not_ready`**, and GitHub Actions keeps the screenshot, trace, JUnit result, and report as evidence.
-
-That gives a team a useful conversation:
-
-1. What user journey failed?
-2. What did the user see?
-3. What did the API return?
-4. Is this a product defect, a test defect, or an environment problem?
-5. Has the fix been checked again?
-
-## Visual map of the project
-
-```mermaid
-flowchart TB
-    U[User] --> UI[FlowDesk browser]
-    UI --> API[FastAPI demo API]
-    API --> S[(Synthetic in-memory state)]
-    T[Playwright browser tests] --> UI
-    T2[Playwright API tests] --> API
-    T --> E[JUnit + screenshots + traces]
-    T2 --> E
-    E --> R[Release-readiness report]
-```
-
-## If you want to run it locally
-
-The setup is intentionally below the walkthrough. This is a portfolio demo, so the shortest useful route is to inspect the Actions run first.
-
-<details>
-<summary>Local setup</summary>
-
-### Windows PowerShell
-
-```powershell
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m playwright install chromium
-pytest
-```
-
-### Bash
+Use Python 3.13 or newer.
 
 ```bash
 python3.13 -m venv .venv
@@ -140,20 +42,24 @@ python -m playwright install chromium
 pytest
 ```
 
-Run the demo app with `python -m uvicorn app.main:app --reload`, then open `http://127.0.0.1:8000`.
+Start the demo app with:
 
-</details>
+```bash
+python -m uvicorn app.main:app --reload
+```
 
-## Where to look
+Then open http://127.0.0.1:8000. Demo accounts and their roles are in app/main.py.
 
-- `docs/critical-workflows.md` — the business-risk checklist
-- `docs/demo-script.md` — the step-by-step walkthrough above
-- `docs/test-strategy.md` — the test oracles and failure rules
-- `tests/test_core_workflow.py` — the main user journey
-- `tests/test_subscription_and_roles.py` — plan and role behavior
-- `tools/generate_release_report.py` — turns real JUnit output into a release decision
-- `.github/workflows/ci.yml` — runs the checks and uploads evidence
+## How I'm approaching QA
 
-## Honest scope
+I want each check to have a clear question and a result that can be verified. A request returning 403 isn't always enough: when a forbidden action might have changed data, I read the record back and check for side effects. The same principle applies to release reporting—a green message is not evidence unless it came from the test run.
 
-FlowDesk is fictional. The data is synthetic. This is not a production application, payment integration, penetration test, or claim of complete coverage. It is a focused example of how I move from **manual QA → risk-based coverage → repeatable release evidence**.
+## Limits and next steps
+
+This project uses a fictional app, synthetic records, and in-memory state. It does not certify a real SaaS service, replace a penetration test, or prove complete coverage. I'm still expanding the cases, checking CI behaviour, and improving the examples as I learn.
+
+## Contact
+
+- GitHub: [OperaAxe](https://github.com/OperaAxe)
+- LinkedIn: [davidchristianj](https://linkedin.com/in/davidchristianj)
+- Upwork: [Christian David](https://upwork.com/freelancers/~010e703beaa0687103)
