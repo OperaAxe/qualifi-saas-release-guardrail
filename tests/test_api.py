@@ -35,3 +35,42 @@ def test_unsupported_webhook_is_rejected(playwright, app_server: str, clean_stat
         "/api/webhooks/subscription", data={"event_id": "evt-bad", "event_type": "unknown"}
     )
     assert response.status == 400
+
+
+@pytest.mark.api
+@pytest.mark.regression
+def test_invalid_webhook_does_not_consume_idempotency_key(
+    playwright, app_server: str, clean_state: None
+) -> None:
+    api = playwright.request.new_context(base_url=app_server)
+    event_id = "evt-retry-after-validation-failure"
+
+    invalid = api.post(
+        "/api/webhooks/subscription",
+        data={"event_id": event_id, "event_type": "not-supported"},
+    )
+    valid_retry = api.post(
+        "/api/webhooks/subscription",
+        data={"event_id": event_id, "event_type": "subscription.activated"},
+    )
+
+    assert invalid.status == 400
+    assert valid_retry.status == 200
+    assert valid_retry.json()["status"] == "processed"
+
+
+@pytest.mark.api
+@pytest.mark.regression
+def test_duplicate_valid_webhook_is_processed_only_once(
+    playwright, app_server: str, clean_state: None
+) -> None:
+    api = playwright.request.new_context(base_url=app_server)
+    payload = {"event_id": "evt-once-only", "event_type": "subscription.activated"}
+
+    first = api.post("/api/webhooks/subscription", data=payload)
+    duplicate = api.post("/api/webhooks/subscription", data=payload)
+
+    assert first.status == 200
+    assert first.json()["status"] == "processed"
+    assert duplicate.status == 200
+    assert duplicate.json()["status"] == "duplicate"
