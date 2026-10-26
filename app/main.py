@@ -160,9 +160,11 @@ class WebhookIn(BaseModel):
 
 @app.post("/api/webhooks/subscription")
 def subscription_webhook(event: WebhookIn) -> dict[str, str]:
+    # Validate before reserving the idempotency key. A bad first delivery
+    # must not make a later valid retry look like a duplicate.
+    if event.event_type not in {"subscription.activated", "subscription.failed"}:
+        raise HTTPException(status_code=400, detail="Unsupported event")
     if event.event_id in EVENTS:
         return {"status": "duplicate", "event_id": event.event_id}
     EVENTS[event.event_id] = {"type": event.event_type}
-    if event.event_type not in {"subscription.activated", "subscription.failed"}:
-        raise HTTPException(status_code=400, detail="Unsupported event")
     return {"status": "processed", "event_id": event.event_id}
